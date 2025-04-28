@@ -4,6 +4,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { faker } = require('@faker-js/faker');
 const path = require('path'); // Добавляем path
+const bcrypt = require('bcryptjs');
+const session = require('express-session');
 faker.locale = 'ru'; // Установка локали на русский язык
 
 // Загрузка переменных окружения
@@ -17,10 +19,17 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Настройка сессий
+app.use(session({
+    secret: 'Q1qqqqqq', // Секретный ключ для подписи сессий
+    resave: false,            // Не сохранять сессию при каждом запросе
+    saveUninitialized: true,  // Сохранять неинициализированные сессии
+    cookie: { secure: false } // Установите `true`, если используете HTTPS
+}));
+
 // Подключение статических файлов Vue.js
 const publicPath = path.join(__dirname, 'public'); // Путь к папке public
 app.use(express.static(publicPath));
-
 // Подключение к MySQL
 const pool = mysql.createPool({
     host: process.env.MYSQL_HOST || 'bvmeqovnx74dgjg8fx95-mysql.services.clever-cloud.com', // Host из Railway
@@ -76,6 +85,31 @@ async function initializeDatabase() {
                 contraindications TEXT
             )
         `);
+              // Создание таблицы users с полем role
+              await pool.query(`
+                CREATE TABLE IF NOT EXISTS users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    username VARCHAR(255) NOT NULL UNIQUE,
+                    password VARCHAR(255) NOT NULL,
+                    role ENUM('admin', 'user') NOT NULL DEFAULT 'user'
+                )
+            `);
+    
+            // Проверка существования администратора
+            const adminEmail = 'admin';
+            const adminPassword = 'Q1!qqqqqq';
+    
+            const [existingAdmin] = await pool.query('SELECT * FROM users WHERE username = ?', [adminEmail]);
+            if (existingAdmin.length === 0) {
+                // Хешируем пароль
+                const hashedPassword = await bcrypt.hash(adminPassword, 8);
+    
+                // Создаем администратора с ролью admin
+                await pool.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', [adminEmail, hashedPassword, 'admin']);
+                console.log('Администратор создан: admin');
+            } else {
+                console.log('Администратор уже существует: admin');
+            }
         console.log('Database tables initialized');
     } catch (error) {
         console.error('Error initializing database:', error.message);
@@ -168,8 +202,98 @@ async function runSeeder() {
         console.error('Ошибка при выполнении сидера:', error.message);
     }
 }
+// Маршрут для регистрации
+app.post('/register', async (req, res) => {
+    const { username, password } = req.body;
+
+    try {
+        // Проверяем, существует ли пользователь с таким именем
+        const [existingUser] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (existingUser.length > 0) {
+            return res.status(400).json({ message: 'Пользователь с таким именем уже существует' });
+        }
+
+        // Хешируем пароль
+        const hashedPassword = await bcrypt.hash(password, 8);
+
+        // Сохраняем пользователя в базе данных
+        await pool.query('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
+
+        res.status(201).json({ message: 'Регистрация успешна' });
+    } catch (error) {
+        console.error('Ошибка при регистрации:', error.message);
+        res.status(500).json({ message: 'Ошибка сервера' });
+    }
+});
+
+// Маршрут для входа
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    try {
+        // Находим пользователя по имени
+        const [users] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
+        const user = users[0];
+
+        if (!user) {
+            return res.status(400).json({ message: 'Неверное имя пользователя или пароль' });
+        }
+
+        // Проверяем пароль
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Неверное имя пользователя или пароль' });
+        }
+
+        // Устанавливаем сессию
+        req.session.userId = user.id;
+        req.session.username = user.username; // Сохраняем имя пользователя
+        req.session.role = user.role; // Сохраняем роль пользователя
+
+        res.json({
+            message: 'Вход выполнен успешно',
+            username: user.username,
+            role: user.role
+        });
+    } catch (error) {
+        console.error('Ошибка при входе:', error.message);
+        res.status(500).json({ message: 'Ошибка сервера' });
+    }
+});
+
+// Маршрут для выхода
+app.get('/logout', (req, res) => {
+    req.session.destroy(err => {
+        if (err) {
+            return res.status(500).json({ message: 'Ошибка при выходе' });
+        }
+        res.json({ message: 'Вы успешно вышли' });
+    });
+});
+
+// Защищенный маршрут
+app.get('/protected', (req, res) => {
+    if (!req.session.userId) {
+        return res.status(401).json({ message: 'Необходимо войти в систему' });
+    }
+
+    res.json({
+        userId: req.session.userId,
+        username: req.session.username,
+        role: req.session.role
+    });
+});
 // Маршруты API для medical_goods
-app.get('/api/medical-goods', async (req, res) => {
+// Middleware для проверки роли администратора
+function isAdmin(req, res, next) {
+    if (!req.session.userId || req.session.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied. Admin role required.' });
+    }
+    next();
+}
+
+// Маршруты API для medical_goods
+app.get('/api/medical-goods', isAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -181,7 +305,6 @@ app.get('/api/medical-goods', async (req, res) => {
 
         // Получаем товары с учетом пагинации
         const [rows] = await pool.query('SELECT * FROM medical_goods LIMIT ? OFFSET ?', [limit, offset]);
-
         res.json({
             data: rows,
             meta: {
@@ -197,7 +320,7 @@ app.get('/api/medical-goods', async (req, res) => {
     }
 });
 
-app.get('/api/medical-goods/:id', async (req, res) => {
+app.get('/api/medical-goods/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         const [rows] = await pool.query('SELECT * FROM medical_goods WHERE id = ?', [id]);
@@ -210,7 +333,7 @@ app.get('/api/medical-goods/:id', async (req, res) => {
     }
 });
 
-app.post('/api/medical-goods', async (req, res) => {
+app.post('/api/medical-goods', isAdmin, async (req, res) => {
     const { name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications } = req.body;
 
     // Проверка обязательных полей
@@ -244,7 +367,8 @@ app.post('/api/medical-goods', async (req, res) => {
         res.status(500).json({ error: 'Failed to add medical good', details: error.message });
     }
 });
-app.put('/api/medical-goods/:id', async (req, res) => {
+
+app.put('/api/medical-goods/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     const updatedGood = req.body;
 
@@ -278,7 +402,7 @@ app.put('/api/medical-goods/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/medical-goods/:id', async (req, res) => {
+app.delete('/api/medical-goods/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         const [result] = await pool.query('DELETE FROM medical_goods WHERE id = ?', [id]);
@@ -292,7 +416,7 @@ app.delete('/api/medical-goods/:id', async (req, res) => {
 });
 
 // Маршруты API для medicines
-app.get('/api/medicines', async (req, res) => {
+app.get('/api/medicines', isAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -320,7 +444,7 @@ app.get('/api/medicines', async (req, res) => {
     }
 });
 
-app.get('/api/medicines/:id', async (req, res) => {
+app.get('/api/medicines/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         const [rows] = await pool.query('SELECT * FROM medicines WHERE id = ?', [id]);
@@ -333,7 +457,7 @@ app.get('/api/medicines/:id', async (req, res) => {
     }
 });
 
-app.post('/api/medicines', async (req, res) => {
+app.post('/api/medicines', isAdmin, async (req, res) => {
     const { name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications } = req.body;
 
     // Проверка обязательных полей
@@ -352,7 +476,7 @@ app.post('/api/medicines', async (req, res) => {
     }
 });
 
-app.put('/api/medicines/:id', async (req, res) => {
+app.put('/api/medicines/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     const updatedMedicine = req.body;
 
@@ -386,7 +510,7 @@ app.put('/api/medicines/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/medicines/:id', async (req, res) => {
+app.delete('/api/medicines/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         const [result] = await pool.query('DELETE FROM medicines WHERE id = ?', [id]);
