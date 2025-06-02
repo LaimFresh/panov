@@ -15,7 +15,9 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    credentials: true // разрешаем куки
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -32,10 +34,10 @@ const publicPath = path.join(__dirname, 'public'); // Путь к папке pub
 app.use(express.static(publicPath));
 // Подключение к MySQL
 const pool = mysql.createPool({
-    host: process.env.MYSQL_HOST || 'bvmeqovnx74dgjg8fx95-mysql.services.clever-cloud.com', // Host из Railway
-    user: process.env.MYSQL_USER || 'ue4jayvcpjd23i90',     // User из Railway
-    password: process.env.MYSQL_PASSWORD || 'HKkh8FyE8yNboQydEZBP', // Password из Railway
-    database: process.env.MYSQL_DATABASE || 'bvmeqovnx74dgjg8fx95', // Database из Railway
+    host: process.env.MYSQL_HOST || 'localhost', // Host из Railway
+    user: process.env.MYSQL_USER || 'root',     // User из Railway
+    password: process.env.MYSQL_PASSWORD || '', // Password из Railway
+    database: process.env.MYSQL_DATABASE || 'vuep', // Database из Railway
     port: process.env.MYSQL_PORT || 3306,       // Port из Railway
     waitForConnections: true,
     connectionLimit: 10,
@@ -57,33 +59,31 @@ async function initializeDatabase() {
     try {
         // Создание таблицы medical_goods
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS medical_goods (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                category VARCHAR(255) NOT NULL,
-                availability BOOLEAN NOT NULL DEFAULT TRUE,
-                description TEXT,
-                manufacturer VARCHAR(255) NOT NULL,
-                image_url VARCHAR(255),
-                expiration_date DATETIME NOT NULL,
-                price DECIMAL(18, 2) NOT NULL,
-                contraindications TEXT
-            )
+            CREATE TABLE IF NOT EXISTS products (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    category VARCHAR(255) NOT NULL,
+    description TEXT,
+    material VARCHAR(255) NOT NULL,
+    dimensions VARCHAR(100) NOT NULL,
+    price DECIMAL(18, 2) NOT NULL,
+    image_url VARCHAR(255),
+    in_stock BOOLEAN NOT NULL DEFAULT TRUE
+)
         `);
         // Создание таблицы medicines
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS medicines (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                category VARCHAR(255) NOT NULL,
-                availability BOOLEAN NOT NULL DEFAULT TRUE,
-                description TEXT,
-                manufacturer VARCHAR(255) NOT NULL,
-                image_url VARCHAR(255),
-                expiration_date DATETIME NOT NULL,
-                price DECIMAL(18, 2) NOT NULL,
-                contraindications TEXT
-            )
+            CREATE TABLE IF NOT EXISTS employees (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    full_name VARCHAR(255) NOT NULL,
+    position VARCHAR(255) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(255),
+    hire_date DATE NOT NULL,
+    salary DECIMAL(18, 2) NOT NULL,
+    experience_years INT NOT NULL,
+    image_url VARCHAR(255)
+)
         `);
               // Создание таблицы users с полем role
               await pool.query(`
@@ -116,78 +116,93 @@ async function initializeDatabase() {
     }
 }
 
-// Функция для заполнения таблицы medical_goods
-async function seedMedicalGoods() {
+async function seedProducts() {
     try {
-        const [countRows] = await pool.query('SELECT COUNT(*) AS count FROM medical_goods');
+        const [countRows] = await pool.query('SELECT COUNT(*) AS count FROM products');
         if (countRows[0].count > 0) {
-            console.log('Таблица medical_goods уже содержит данные. Пропускаем заполнение.');
+            console.log('Таблица products уже содержит данные. Пропускаем заполнение.');
             return;
         }
 
-        const goods = [];
+        const products = [];
+        const categories = ['Столы', 'Стулья', 'Диваны', 'Кровати', 'Шкафы', 'Тумбы'];
+        const materials = ['ДСП', 'Массив дерева', 'МДФ', 'Пластик', 'Металл'];
+
         for (let i = 1; i <= 100; i++) {
-            goods.push([
+            products.push([
                 faker.commerce.productName(), // Название товара
-                faker.helpers.arrayElement(['Медицинские принадлежности', 'Изделия медицинского назначения', 'Косметика']), // Категория
-                faker.datatype.boolean(), // Наличие
-                faker.lorem.paragraph(), // Описание
-                faker.company.name(), // Производитель
-                `s${i}.jpg`, // Изображение (1.jpg - 100.jpg)
-                faker.date.future(), // Дата истечения срока годности
-                parseFloat(faker.commerce.price(100, 10000)), // Цена
-                faker.lorem.sentence(), // Противопоказания
+                faker.helpers.arrayElement(categories), // Категория
+                faker.lorem.sentence(), // Описание
+                faker.helpers.arrayElement(materials), // Материал
+                `${faker.number.int({ min: 100, max: 999 })}x${faker.number.int({ min: 50, max: 500 })}x${faker.number.int({ min: 40, max: 200 })}`, // Габариты
+                parseFloat(faker.commerce.price(5000, 100000)), // Цена
+                `p${i}.jpg`, // Изображение
+                faker.datatype.boolean(), // В наличии
             ]);
         }
 
-        // Вставка данных
         const query = `
-            INSERT INTO medical_goods 
-            (name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications)
+            INSERT INTO products 
+            (name, category, description, material, dimensions, price, image_url, in_stock)
             VALUES ?
         `;
-        await pool.query(query, [goods]);
-        console.log('Таблица medical_goods успешно заполнена.');
+        await pool.query(query, [products]);
+        console.log('Таблица products успешно заполнена.');
     } catch (error) {
-        console.error('Ошибка при заполнении таблицы medical_goods:', error.message);
+        console.error('Ошибка при заполнении таблицы products:', error.message);
         throw error;
     }
 }
 
 // Функция для заполнения таблицы medicines
-async function seedMedicines() {
+async function seedEmployees() {
     try {
-        const [countRows] = await pool.query('SELECT COUNT(*) AS count FROM medicines');
+        const [countRows] = await pool.query('SELECT COUNT(*) AS count FROM employees');
         if (countRows[0].count > 0) {
-            console.log('Таблица medicines уже содержит данные. Пропускаем заполнение.');
+            console.log('Таблица employees уже содержит данные. Пропускаем заполнение.');
             return;
         }
 
-        const medicines = [];
-        for (let i = 1; i <= 100; i++) {
-            medicines.push([
-                faker.commerce.productName(), // Название лекарства
-                faker.helpers.arrayElement(['Антибиотики', 'Противовирусные', 'Обезболивающие', 'Витамины']), // Категория
-                faker.datatype.boolean(), // Наличие
-                faker.lorem.paragraph(), // Описание
-                faker.company.name(), // Производитель
-                `f${i}.jpg`, // Изображение (1.jpg - 100.jpg)
-                faker.date.future(), // Дата истечения срока годности
-                parseFloat(faker.commerce.price(100, 10000)), // Цена
-                faker.lorem.sentence(), // Противопоказания
-            ]);
-        }
+        const employees = [];
+        const positions = [
+            'Столяр',
+            'Сборщик мебели',
+            'Дизайнер',
+            'Резчик по дереву',
+            'Упаковщик',
+            'Логист'
+        ];
 
-        // Вставка данных
+       for (let i = 1; i <= 100; i++) {
+    const hireDate = faker.date.past(); // Дата найма
+    const birthDate = faker.date.between({ from: '1980-01-01', to: '2004-01-01' }); // Дата рождения
+    const experienceYears = Math.floor((new Date() - hireDate) / (1000 * 60 * 60 * 24 * 365)); // Стаж в годах
+
+    employees.push([
+        faker.person.fullName(), // Полное имя
+        faker.helpers.arrayElement(positions), // Должность
+      '+7 (' + 
+faker.string.numeric(3) + ') ' + 
+faker.string.numeric(3) + '-' + 
+faker.string.numeric(2) + '-' + 
+faker.string.numeric(2),
+        faker.internet.email(), // Email
+        hireDate, // Дата найма
+        parseFloat(faker.finance.amount(30000, 100000)), // Зарплата
+        experienceYears, // Стаж работы
+        `e${i}.jpg`, // Фото
+    ]);
+}
+
         const query = `
-            INSERT INTO medicines 
-            (name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications)
+            INSERT INTO employees 
+            (full_name, position, phone, email, hire_date, salary, experience_years, image_url)
             VALUES ?
         `;
-        await pool.query(query, [medicines]);
-        console.log('Таблица medicines успешно заполнена.');
+        await pool.query(query, [employees]);
+        console.log('Таблица employees успешно заполнена.');
     } catch (error) {
-        console.error('Ошибка при заполнении таблицы medicines:', error.message);
+        console.error('Ошибка при заполнении таблицы employees:', error.message);
         throw error;
     }
 }
@@ -195,8 +210,8 @@ async function seedMedicines() {
 // Функция для запуска сидера
 async function runSeeder() {
     try {
-        await seedMedicalGoods();
-        await seedMedicines();
+        await seedProducts();
+        await seedEmployees();
         console.log('Сидер завершил работу.');
     } catch (error) {
         console.error('Ошибка при выполнении сидера:', error.message);
@@ -283,7 +298,6 @@ app.get('/protected', (req, res) => {
         role: req.session.role
     });
 });
-// Маршруты API для medical_goods
 // Middleware для проверки роли администратора
 function isAdmin(req, res, next) {
     if (!req.session.userId || req.session.role !== 'admin') {
@@ -291,20 +305,18 @@ function isAdmin(req, res, next) {
     }
     next();
 }
-
-// Маршруты API для medical_goods
-app.get('/api/medical-goods', isAdmin, async (req, res) => {
+// Получить список товаров с пагинацией
+app.get('/api/products', isAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // Подсчитываем общее количество товаров
-        const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM medical_goods');
+        const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM products');
         const total = countRows[0].total;
 
-        // Получаем товары с учетом пагинации
-        const [rows] = await pool.query('SELECT * FROM medical_goods LIMIT ? OFFSET ?', [limit, offset]);
+        const [rows] = await pool.query('SELECT * FROM products LIMIT ? OFFSET ?', [limit, offset]);
+
         res.json({
             data: rows,
             meta: {
@@ -315,119 +327,111 @@ app.get('/api/medical-goods', isAdmin, async (req, res) => {
             },
         });
     } catch (error) {
-        console.error('Error fetching medical goods:', error.message);
-        res.status(500).json({ error: 'Failed to fetch medical goods', details: error.message });
+        console.error('Error fetching products:', error.message);
+        res.status(500).json({ error: 'Failed to fetch products', details: error.message });
     }
 });
 
-app.get('/api/medical-goods/:id', isAdmin, async (req, res) => {
+// Получить товар по ID
+app.get('/api/products/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-        const [rows] = await pool.query('SELECT * FROM medical_goods WHERE id = ?', [id]);
+        const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [id]);
         if (rows.length === 0) {
-            return res.status(404).json({ error: 'Medical good not found' });
+            return res.status(404).json({ error: 'Product not found' });
         }
         res.json(rows[0]);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch medical good', details: error.message });
+        res.status(500).json({ error: 'Failed to fetch product', details: error.message });
     }
 });
 
-app.post('/api/medical-goods', isAdmin, async (req, res) => {
-    const { name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications } = req.body;
+// Добавить новый товар
+app.post('/api/products', isAdmin, async (req, res) => {
+    const { name, category, description, material, dimensions, price, image_url, in_stock } = req.body;
 
-    // Проверка обязательных полей
-    if (!name || !category || typeof availability === 'undefined' || !manufacturer || !expiration_date || !price) {
+    if (!name || !category || !material || !dimensions || price == null) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Преобразование данных
     const parsedPrice = parseFloat(price);
     if (isNaN(parsedPrice)) {
         return res.status(400).json({ error: 'Invalid price format' });
     }
 
-    const parsedAvailability = availability === 'true' || availability === true;
-    const parsedExpirationDate = new Date(expiration_date);
-    if (isNaN(parsedExpirationDate.getTime())) {
-        return res.status(400).json({ error: 'Invalid expiration date format' });
-    }
+    const availability = in_stock === 'true' || in_stock === true;
 
     try {
         const [result] = await pool.query(
-            'INSERT INTO medical_goods (name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, category, parsedAvailability, description, manufacturer, image_url, parsedExpirationDate, parsedPrice, contraindications]
+            'INSERT INTO products (name, category, description, material, dimensions, price, image_url, in_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, category, description, material, dimensions, parsedPrice, image_url, availability]
         );
         res.status(201).json({ id: result.insertId });
     } catch (error) {
         console.error('Database error:', error.message);
-        if (error.code === 'ER_BAD_NULL_ERROR') {
-            return res.status(400).json({ error: 'One or more required fields are missing in the database' });
-        }
-        res.status(500).json({ error: 'Failed to add medical good', details: error.message });
+        res.status(500).json({ error: 'Failed to add product', details: error.message });
     }
 });
 
-app.put('/api/medical-goods/:id', isAdmin, async (req, res) => {
+// Обновить товар
+app.put('/api/products/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
-    const updatedGood = req.body;
+    const updatedProduct = req.body;
 
-    // Проверка обязательных полей
-    if (!updatedGood.name || !updatedGood.category || !updatedGood.manufacturer || !updatedGood.expiration_date || !updatedGood.price) {
+    if (!updatedProduct.name || !updatedProduct.category || !updatedProduct.material || !updatedProduct.dimensions || !updatedProduct.price) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
     try {
         const [result] = await pool.query(
-            'UPDATE medical_goods SET name = ?, category = ?, availability = ?, description = ?, manufacturer = ?, image_url = ?, expiration_date = ?, price = ?, contraindications = ? WHERE id = ?',
+            'UPDATE products SET name = ?, category = ?, description = ?, material = ?, dimensions = ?, price = ?, image_url = ?, in_stock = ? WHERE id = ?',
             [
-                updatedGood.name,
-                updatedGood.category,
-                updatedGood.availability,
-                updatedGood.description,
-                updatedGood.manufacturer,
-                updatedGood.image_url,
-                updatedGood.expiration_date,
-                updatedGood.price,
-                updatedGood.contraindications,
-                id,
+                updatedProduct.name,
+                updatedProduct.category,
+                updatedProduct.description,
+                updatedProduct.material,
+                updatedProduct.dimensions,
+                updatedProduct.price,
+                updatedProduct.image_url,
+                updatedProduct.in_stock,
+                id
             ]
         );
+
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Medical good not found' });
+            return res.status(404).json({ error: 'Product not found' });
         }
-        res.json({ message: 'Medical good updated successfully' });
+
+        res.json({ message: 'Product updated successfully' });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to update medical good', details: error.message });
+        res.status(500).json({ error: 'Failed to update product', details: error.message });
     }
 });
 
-app.delete('/api/medical-goods/:id', isAdmin, async (req, res) => {
+// Удалить товар
+app.delete('/api/products/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-        const [result] = await pool.query('DELETE FROM medical_goods WHERE id = ?', [id]);
+        const [result] = await pool.query('DELETE FROM products WHERE id = ?', [id]);
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Medical good not found' });
+            return res.status(404).json({ error: 'Product not found' });
         }
-        res.json({ message: 'Medical good deleted successfully' });
+        res.json({ message: 'Product deleted successfully' });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to delete medical good', details: error.message });
+        res.status(500).json({ error: 'Failed to delete product', details: error.message });
     }
 });
-
-// Маршруты API для medicines
-app.get('/api/medicines', isAdmin, async (req, res) => {
+// Получить список сотрудников с пагинацией
+app.get('/api/employees', isAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // Подсчитываем общее количество лекарств
-        const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM medicines');
+        const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM employees');
         const total = countRows[0].total;
 
-        // Получаем лекарства с учетом пагинации
-        const [rows] = await pool.query('SELECT * FROM medicines LIMIT ? OFFSET ?', [limit, offset]);
+        const [rows] = await pool.query('SELECT * FROM employees LIMIT ? OFFSET ?', [limit, offset]);
 
         res.json({
             data: rows,
@@ -439,87 +443,96 @@ app.get('/api/medicines', isAdmin, async (req, res) => {
             },
         });
     } catch (error) {
-        console.error('Error fetching medicines:', error.message);
-        res.status(500).json({ error: 'Failed to fetch medicines', details: error.message });
+        console.error('Error fetching employees:', error.message);
+        res.status(500).json({ error: 'Failed to fetch employees', details: error.message });
     }
 });
 
-app.get('/api/medicines/:id', isAdmin, async (req, res) => {
+// Получить сотрудника по ID
+app.get('/api/employees/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-        const [rows] = await pool.query('SELECT * FROM medicines WHERE id = ?', [id]);
+        const [rows] = await pool.query('SELECT * FROM employees WHERE id = ?', [id]);
         if (rows.length === 0) {
-            return res.status(404).json({ error: 'Medicine not found' });
+            return res.status(404).json({ error: 'Employee not found' });
         }
         res.json(rows[0]);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch medicine', details: error.message });
+        res.status(500).json({ error: 'Failed to fetch employee', details: error.message });
     }
 });
 
-app.post('/api/medicines', isAdmin, async (req, res) => {
-    const { name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications } = req.body;
+// Добавить нового сотрудника
+app.post('/api/employees', isAdmin, async (req, res) => {
+    const { full_name, position, phone, email, hire_date, salary, experience_years, image_url } = req.body;
 
-    // Проверка обязательных полей
-    if (!name || !category || !manufacturer || !expiration_date || !price) {
+    if (!full_name || !position || !phone || !hire_date || !salary || !experience_years) {
         return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const parsedSalary = parseFloat(salary);
+    if (isNaN(parsedSalary)) {
+        return res.status(400).json({ error: 'Invalid salary format' });
     }
 
     try {
         const [result] = await pool.query(
-            'INSERT INTO medicines (name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, category, availability, description, manufacturer, image_url, expiration_date, price, contraindications]
+            'INSERT INTO employees (full_name, position, phone, email, hire_date, salary, experience_years, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [full_name, position, phone, email, hire_date, parsedSalary, parseInt(experience_years), image_url]
         );
         res.status(201).json({ id: result.insertId });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to add medicine', details: error.message });
+        console.error('Database error:', error.message);
+        res.status(500).json({ error: 'Failed to add employee', details: error.message });
     }
 });
 
-app.put('/api/medicines/:id', isAdmin, async (req, res) => {
+// Обновить данные сотрудника
+app.put('/api/employees/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
-    const updatedMedicine = req.body;
+    const updatedEmployee = req.body;
 
-    // Проверка обязательных полей
-    if (!updatedMedicine.name || !updatedMedicine.category || !updatedMedicine.manufacturer || !updatedMedicine.expiration_date || !updatedMedicine.price) {
+    if (!updatedEmployee.full_name || !updatedEmployee.position || !updatedEmployee.phone || !updatedEmployee.hire_date || !updatedEmployee.salary || !updatedEmployee.experience_years) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
     try {
         const [result] = await pool.query(
-            'UPDATE medicines SET name = ?, category = ?, availability = ?, description = ?, manufacturer = ?, image_url = ?, expiration_date = ?, price = ?, contraindications = ? WHERE id = ?',
+            'UPDATE employees SET full_name = ?, position = ?, phone = ?, email = ?, hire_date = ?, salary = ?, experience_years = ?, image_url = ? WHERE id = ?',
             [
-                updatedMedicine.name,
-                updatedMedicine.category,
-                updatedMedicine.availability,
-                updatedMedicine.description,
-                updatedMedicine.manufacturer,
-                updatedMedicine.image_url,
-                updatedMedicine.expiration_date,
-                updatedMedicine.price,
-                updatedMedicine.contraindications,
-                id,
+                updatedEmployee.full_name,
+                updatedEmployee.position,
+                updatedEmployee.phone,
+                updatedEmployee.email,
+                updatedEmployee.hire_date,
+                updatedEmployee.salary,
+                updatedEmployee.experience_years,
+                updatedEmployee.image_url,
+                id
             ]
         );
+
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Medicine not found' });
+            return res.status(404).json({ error: 'Employee not found' });
         }
-        res.json({ message: 'Medicine updated successfully' });
+
+        res.json({ message: 'Employee updated successfully' });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to update medicine', details: error.message });
+        res.status(500).json({ error: 'Failed to update employee', details: error.message });
     }
 });
 
-app.delete('/api/medicines/:id', isAdmin, async (req, res) => {
+// Удалить сотрудника
+app.delete('/api/employees/:id', isAdmin, async (req, res) => {
     const { id } = req.params;
     try {
-        const [result] = await pool.query('DELETE FROM medicines WHERE id = ?', [id]);
+        const [result] = await pool.query('DELETE FROM employees WHERE id = ?', [id]);
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Medicine not found' });
+            return res.status(404).json({ error: 'Employee not found' });
         }
-        res.json({ message: 'Medicine deleted successfully' });
+        res.json({ message: 'Employee deleted successfully' });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to delete medicine', details: error.message });
+        res.status(500).json({ error: 'Failed to delete employee', details: error.message });
     }
 });
 // Обработка всех остальных маршрутов для Vue Router
